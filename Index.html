@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jonas Enke — JVB Netzplan</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #ede9da; font-family: 'Arial Narrow', Arial, sans-serif; overflow: hidden; height: 100vh; }
+
+#map-wrap {
+  width: 100vw; height: 100vh;
+  overflow: hidden; position: relative;
+  cursor: grab; user-select: none; touch-action: none;
+}
+#map-wrap.grabbing { cursor: grabbing; }
+#map-svg { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+
+#header {
+  position: fixed; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(237,233,218,0.94);
+  backdrop-filter: blur(6px);
+  border-bottom: 2px solid #c8b890;
+  z-index: 200;
+}
+.kvb-badge { background:#e2001a; color:#fff; font-size:14px; font-weight:900; padding:5px 12px; border-radius:4px; letter-spacing:.5px; }
+.kvb-title { font-size:13px; font-weight:700; color:#2d1f00; letter-spacing:.2px; }
+.kvb-subtitle { font-size:10px; color:#8b7040; font-weight:600; margin-top:1px; }
+.zoom-controls { display:flex; gap:5px; }
+.zoom-btn {
+  width:32px; height:32px; background:#fff; border:2px solid #c8b890;
+  border-radius:6px; font-size:18px; font-weight:700; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; color:#2d1f00; transition:all .15s;
+}
+.zoom-btn:hover { background:#e2001a; color:#fff; border-color:#e2001a; }
+
+
+
+#legend {
+  position:fixed; top:58px; right:12px;
+  background:rgba(237,233,218,0.96); border:1.5px solid #c8b890;
+  border-radius:8px; padding:10px 13px; z-index:200; min-width:140px;
+}
+.leg-title { font-size:9px; font-weight:900; color:#8b7040; text-transform:uppercase; letter-spacing:.8px; margin-bottom:7px; }
+.leg-row { display:flex; align-items:center; gap:7px; padding:2.5px 0; font-size:10px; font-weight:700; color:#2d1f00; }
+.leg-line { width:24px; height:5px; border-radius:3px; flex-shrink:0; }
+
+/* ── TOOLTIP ── */
+#tooltip {
+  position: fixed;
+  z-index: 500;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  width: 210px;
+}
+#tooltip.show { opacity: 1; pointer-events: all; }
+.tt-box {
+  background: #F5F3F6;
+  border: 2px solid #c8b890;
+  border-radius: 10px;
+  padding: 11px 13px 12px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.20);
+  position: relative;
+}
+.tt-arrow {
+  position: absolute;
+  width: 0; height: 0;
+}
+.tt-arrow.below {
+  top: -9px;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-bottom: 9px solid #c8b890;
+}
+.tt-arrow.below::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: -7px;
+  width: 0; height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid #F5F3F6;
+}
+.tt-arrow.above {
+  bottom: -9px;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 9px solid #c8b890;
+}
+.tt-arrow.above::after {
+  content: '';
+  position: absolute;
+  bottom: 3px; left: -7px;
+  width: 0; height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid #F5F3F6;
+}
+.tt-close {
+  position: absolute; top: 7px; right: 7px;
+  width: 20px; height: 20px;
+  background: #e2001a; color: #fff; border: none;
+  border-radius: 50%; font-size: 10px; font-weight: 900;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+.tt-pill {
+  display: inline-block;
+  font-size: 9px; font-weight: 900;
+  padding: 2px 7px; border-radius: 3px; color: #fff;
+  margin-bottom: 5px; letter-spacing: .4px;
+}
+.tt-name { font-size: 13px; font-weight: 800; color: #1a0f00; margin-bottom: 2px; padding-right: 16px; line-height: 1.2; }
+.tt-sub  { font-size: 9.5px; color: #8b7040; margin-bottom: 6px; font-weight: 600; }
+.tt-desc { font-size: 10px; color: #4a3810; line-height: 1.55; }
+.tt-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 7px; }
+.tt-tag  { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 100px; color: #fff; }
+
+#hint {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  background:rgba(20,12,0,.72); color:rgba(237,233,218,.92);
+  font-size:10px; font-weight:700; padding:7px 16px;
+  border-radius:100px; pointer-events:none;
+  transition:opacity .6s; z-index:199; white-space:nowrap;
+}
+#hint.gone { opacity:0; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="kvb-badge">JVB</span>
+    <div><div class="kvb-title">Netzplan · Jonas Enke</div><div class="kvb-subtitle">Persönlicher Linienplan · 2025</div></div>
+  </div>
+  <div class="zoom-controls">
+    <button class="zoom-btn" id="btn-plus">+</button>
+    <button class="zoom-btn" id="btn-minus">−</button>
+  </div>
+</div>
+
+<div id="tooltip">
+  <div class="tt-box">
+    <button class="tt-close" id="tt-close">✕</button>
+    <div class="tt-arrow below" id="tt-arrow"></div>
+    <div class="tt-pill" id="tt-pill"></div>
+    <div class="tt-name" id="tt-name"></div>
+    <div class="tt-sub"  id="tt-sub"></div>
+    <div class="tt-desc" id="tt-desc"></div>
+    <div class="tt-tags" id="tt-tags"></div>
+  </div>
+</div>
+
+<div id="map-wrap"><svg id="map-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+
+
+
+<div id="legend"></div>
+<div id="hint">Ziehen · Zoomen · Station antippen</div>
+
+<script>
+/* ================================================================
+   DATA
+   ================================================================
+
+   Each LINE is a through-route: terminus A → ... → HUB → ... → terminus B
+   Lines enter and exit from OPPOSITE sides of the hub.
+   No branches.
+
+   Line angles (entry → exit, measured from hub):
+   Linie 1  Karriere   W ←→ N      (links ←→ oben)
+   Linie 3  WDR        NW ←→ E     (oben-links ←→ rechts)
+   Linie 4  Bildung    SW ←→ NE    (unten-links ←→ oben-rechts)
+   Linie 7  Skills     S ←→ NE     (unten ←→ oben-rechts)
+   Linie 9  Themen     SE ←→ NW    (unten-rechts ←→ oben-links)
+   Linie 16 Hobbys     SW ←→ SE    (unten-links ←→ unten-rechts)
+   Linie 18 Persönlich W ←→ SE     (links ←→ unten-rechts)
+
+   Hub = WDR Köln at (560, 480)
+*/
+
+const HUB = { x: 560, y: 480 };
+
+const LINES_DEF = [
+  { id:'karriere', num:'1',  name:'Karriere',     color:'#e2001a' },
+  { id:'wdr',      num:'3',  name:'WDR-Stationen',color:'#e85d00' },
+  { id:'bildung',  num:'4',  name:'Bildung',       color:'#005ca9' },
+  { id:'skills',   num:'7',  name:'Skills',        color:'#6e822a' },
+  { id:'themen',   num:'9',  name:'Themen',        color:'#c8a000' },
+  { id:'hobbys',   num:'16', name:'Hobbys',        color:'#8b4fa0' },
+  { id:'privat',   num:'18', name:'Persönlich',    color:'#009999' },
+];
+
+/*  Route format: array of stations from terminus-A → hub → terminus-B
+    Each station: { id, name, sub, desc, tags, x, y }
+    Hub station is shared, id='hub'
+    Stations shared between lines = same id (creates interchange dot)    */
+
+const ROUTES = {
+
+  /* ── LINIE 1: KARRIERE ── W ←→ N */
+  karriere: [
+    { id:'mephisto', name:'Mephisto 97.6', sub:'Studentenradio Leipzig · 2017–2020',
+      desc:'Sechswöchige Sommerakademie und Grundlagen des Radiojournalismus. Anschließend Redaktionsleitung Musikressort: Strukturierung der Redaktionsabläufe und der Musikrotation. Freie Mitarbeit mit Beiträgen für Musik-, Politik- und Nachrichtenformate.',
+      tags:['Radio','Musik','Redaktionsleitung'], x:120, y:480, terminus:true },
+    { id:'rbb', name:'rbb Sommerakademie', sub:'Rundfunk Berlin-Brandenburg · 2019',
+      desc:'Sommerakademie mit Hospitationen in diversen Redaktionen und Erstellung eines Projektblogs.',
+      tags:['Hospitanz','ÖRR'], x:240, y:480 },
+    { id:'detektor', name:'Detektor.fm', sub:'Freie Mitarbeit · 2019–2021',
+      desc:'CvD in der Redaktion des tagesaktuellen Podcasts „Zurück zum Thema".',
+      tags:['Podcast','CvD','Aktuelles'], x:380, y:480 },
+    { id:'hub' },
+    { id:'mdr_prakt', name:'MDR Sachsen-Anhalt', sub:'Praktikum · 8 Wochen · 07–08/2023',
+      desc:'Redaktionelle Tätigkeiten im trimedialen Politikressort mit Fokus auf Bewegtbild.',
+      tags:['Politik','TV','Trimedial'], x:560, y:340 },
+    { id:'mdr_freie', name:'MDR · Freie Mitarbeit', sub:'10/2023 – 03/2024',
+      desc:'Freie Mitarbeit im trimedialen Politikressort des MDR Sachsen-Anhalt.',
+      tags:['Politik','Freie Mitarbeit'], x:560, y:220 },
+    { id:'dw', name:'Deutsche Welle', sub:'Werkstudent · 08/2024 – 09/2025',
+      desc:'Werkstudierendenstelle mit den Schwerpunkten Program Monitoring sowie Data Analytics und Automatisierung.',
+      tags:['Daten','International','Analytics'], x:480, y:120, terminus:true },
+  ],
+
+  /* ── LINIE 3: WDR-STATIONEN ── NW ←→ E */
+  wdr: [
+    { id:'wdr_lokalzeit', name:'Lokalzeit Bergisches Land', sub:'Regionalmagazin · Studio Wuppertal',
+      desc:'Regionale Berichterstattung für die Lokalzeit Bergisches Land im Studio Wuppertal.',
+      tags:['Lokal','TV','Wuppertal'], x:200, y:200, terminus:true },
+    { id:'wdr_quarks', name:'Quarks', sub:'Wissenschaftsformat',
+      desc:'Wissenschaftsformat des WDR mit Schwerpunkt auf alltagsnahen und einordnenden Beiträgen.',
+      tags:['Wissenschaft','Social','Erklärformate'], x:320, y:300 },
+    { id:'wdr_monitor', name:'Monitor', sub:'ARD-Politikmagazin',
+      desc:'Investigatives und kritisches ARD-Politikmagazin mit Fokus auf Hintergrundrecherche.',
+      tags:['Politik','Investigativ','ARD'], x:420, y:380 },
+    { id:'hub' },
+    { id:'wdr_newsroom', name:'Newsroom', sub:'NRW-Nachrichtenformate',
+      desc:'Tagesaktuelle Nachrichtenformate für Nordrhein-Westfalen aus dem zentralen Newsroom.',
+      tags:['Aktuelles','Nachrichten','NRW'], x:740, y:410 },
+    { id:'wdr_landespol', name:'Landespolitik', sub:'Westpol (TV) & Westblick (Radio)',
+      desc:'Landespolitische Berichterstattung im Fernsehmagazin Westpol und im Radiomagazin Westblick.',
+      tags:['Politik','TV','Radio','NRW'], x:900, y:340, terminus:true },
+  ],
+
+  /* ── LINIE 4: BILDUNG ── SW ←→ NE */
+  bildung: [
+    { id:'abi', name:'Abitur', sub:'Magdeburg · 2007–2016',
+      desc:'Allgemeine Hochschulreife am Hegel-Gymnasium und an der IGS Willy Brandt in Magdeburg. Abschlussnote 1,5.',
+      tags:['Schule','Magdeburg','Abi 1,5'], x:220, y:700, terminus:true },
+    { id:'ba_komm', name:'B.A. Komm.- & Medienwiss.', sub:'Universität Leipzig · 2016–2023',
+      desc:'Bachelor of Arts in Kommunikations- und Medienwissenschaft an der Universität Leipzig. Abschlussnote 1,4.',
+      tags:['Bachelor','Medien','Leipzig'], x:340, y:620 },
+    { id:'erasmus', name:'Erasmus Tallinn', sub:'Baltic Film & Media School · 01–06/2019',
+      desc:'Erasmussemester an der Baltic Film and Media School in Tallinn, Estland.',
+      tags:['Erasmus','Tallinn','Film'], x:440, y:560 },
+    { id:'hub' },
+    { id:'ba_pol', name:'B.A. Politikwissenschaft', sub:'Universität Leipzig · 2016–2023',
+      desc:'Bachelor of Arts in Politikwissenschaft an der Universität Leipzig. Abschlussnote 1,4.',
+      tags:['Bachelor','Politik','Leipzig'], x:720, y:320 },
+    { id:'msc', name:'M.Sc. Journalismus', sub:'Universität Leipzig · seit 10/2023',
+      desc:'Masterstudium Journalismus an der Universität Leipzig — läuft aktuell parallel zum Volontariat.',
+      tags:['Master','Journalismus','laufend'], x:880, y:160, terminus:true },
+  ],
+
+  /* ── LINIE 7: SKILLS ── S ←→ NE */
+  skills: [
+    { id:'s_recherche', name:'Recherche', sub:'Methodik · Tiefenrecherche',
+      desc:'Klassische und Online-Recherche — von schneller Verifikation bis zu langen Hintergrundrecherchen.',
+      tags:['Recherche','Online','Quellen'], x:480, y:840, terminus:true },
+    { id:'s_daten', name:'Datenanalyse', sub:'Python · R',
+      desc:'Datenanalyse mit Python und R — von der Aufbereitung bis zur statistischen Auswertung für journalistische Beiträge.',
+      tags:['Python','R','Analyse'], x:500, y:720 },
+    { id:'s_coding', name:'(Vibe-)Coding & KI', sub:'Tech-Kompetenz',
+      desc:'Pragmatisches Coden mit KI-Unterstützung — Automatisierung, kleine Tools bauen und mit Sprachmodellen arbeiten.',
+      tags:['Coding','KI','Tools'], x:520, y:620, labelSide:'right' },
+    { id:'hub' },
+    { id:'s_cross', name:'Crossmedial', sub:'Radio · TV · Online',
+      desc:'Erfahrung in allen Kanälen: Radio, TV und Online — inklusive eigenständigem Drehen und Schneiden.',
+      tags:['Radio','TV','Online','Schnitt'], x:660, y:340 },
+    { id:'s_story', name:'Storytelling & Podcasts', sub:'Audio-Erzählformate',
+      desc:'Langjährige Podcast-Erfahrung — von der Konzeption über CvD-Tätigkeiten bis zur Audioproduktion.',
+      tags:['Podcast','Audio','Storytelling'], x:760, y:240, labelSide:'left' },
+    { id:'s_memes', name:'Memes & Popkultur', sub:'Digitale Lebenswelten',
+      desc:'Gespür für aktuelle Memes, Internetkultur und popkulturelle Strömungen — wichtig für zeitgemäße journalistische Ansprache.',
+      tags:['Memes','Popkultur','Internet'], x:860, y:140, terminus:true, labelSide:'left' },
+  ],
+
+  /* ── LINIE 9: THEMEN ── SE ←→ NW */
+  themen: [
+    { id:'th_politik', name:'Politik', sub:'Themenschwerpunkt',
+      desc:'Politische Berichterstattung mit Fokus auf Landes-, Bundes- und ARD-weite politische Themen.',
+      tags:['Politik','Landtag','Bund'], x:820, y:740, terminus:true, labelSide:'left' },
+    { id:'th_wirtschaft', name:'Wirtschaft', sub:'Themenschwerpunkt',
+      desc:'Wirtschaftsthemen mit Blick auf Unternehmen, Märkte und wirtschaftspolitische Entwicklungen.',
+      tags:['Wirtschaft','Markt','Unternehmen'], x:720, y:660, labelSide:'left' },
+    { id:'th_finanz', name:'Finanzpolitik', sub:'Themenschwerpunkt',
+      desc:'Berichterstattung zu Steuer- und Haushaltspolitik sowie zur Finanzregulierung.',
+      tags:['Steuern','Haushalt','Finanzen'], x:640, y:580, labelSide:'left' },
+    { id:'hub' },
+    { id:'th_sozpol', name:'Sozialpolitik', sub:'Themenschwerpunkt',
+      desc:'Berichterstattung zu Sozialpolitik, Rente, Arbeitsmarkt und sozialen Sicherungssystemen.',
+      tags:['Soziales','Rente','Arbeit'], x:460, y:380, labelSide:'right' },
+    { id:'th_sozwiss', name:'Sozialwissenschaft', sub:'Themenschwerpunkt',
+      desc:'Sozialwissenschaftliche Fragestellungen und gesellschaftliche Entwicklungen.',
+      tags:['Gesellschaft','Forschung','Soziales'], x:360, y:280, labelSide:'right' },
+    { id:'th_daten', name:'Datenjournalismus', sub:'Themenschwerpunkt',
+      desc:'Datengetriebene Recherche, interaktive Visualisierungen und Open-Data-Auswertung.',
+      tags:['Daten','Visualisierung','Recherche'], x:260, y:180, terminus:true, labelSide:'right' },
+  ],
+
+  /* ── LINIE 16: HOBBYS ── SW ←→ SE */
+  hobbys: [
+    { id:'h_musik', name:'Musik', sub:'Klavier · Sadgirl-Indie · Midwest-Emo',
+      desc:'Klavierspielen ist mein aktives Musikhobby — hören tue ich vor allem Sad-Girl Indie und Midwest Emo.',
+      tags:['Klavier','Indie','Emo'], x:240, y:760, terminus:true },
+    { id:'h_laufen', name:'Laufen', sub:'Sport · Ausdauer',
+      desc:'Regelmäßiges Laufen als Ausgleich, zum Kopffreimachen und für die Ausdauer.',
+      tags:['Sport','Bewegung','Ausdauer'], x:340, y:720 },
+    { id:'h_radfahren', name:'Radfahren', sub:'Alltag · Touren',
+      desc:'Im Alltag Stadtradler, gelegentlich längere Touren durch das Umland.',
+      tags:['Sport','Stadt','Natur'], x:440, y:680 },
+    { id:'hub' },
+    { id:'h_bouldern', name:'Bouldern', sub:'Sport · Indoor',
+      desc:'Klettern an der Wand — Konzentration, Kraft und Problemlösung in einem.',
+      tags:['Sport','Klettern','Indoor'], x:680, y:560 },
+    { id:'h_kochen', name:'Kochen', sub:'Arabisch & Asiatisch',
+      desc:'Gerne arabische und asiatische Küche — von levantinischen Gewürzen bis zu südostasiatischen Geschmacksprofilen.',
+      tags:['Kochen','Arabisch','Asiatisch'], x:780, y:620 },
+    { id:'h_lesen', name:'Literatur & Sachbücher', sub:'Lesen · Wissen',
+      desc:'Leidenschaft für Belletristik, politische Sachbücher und lange Reportagen.',
+      tags:['Bücher','Lesen','Wissen'], x:880, y:680, terminus:true },
+  ],
+
+  /* ── LINIE 18: PERSÖNLICH ── W ←→ SE */
+  privat: [
+    { id:'p_damaskus', name:'Damaskus', sub:'Familiäre Wurzeln · Syrien',
+      desc:'Heimatstadt meines Vaters und Lebensmittelpunkt eines Teils meiner Familie. Ein Ort, der Herkunft und Identität prägt.',
+      tags:['Familie','Wurzeln','Syrien'], x:140, y:560, terminus:true },
+    { id:'p_magdeburg', name:'Magdeburg', sub:'Geburtsstadt · Kindheit & Schule',
+      desc:'Hier bin ich aufgewachsen und zur Schule gegangen — am Hegel-Gymnasium und an der IGS Willy Brandt. Heimatstadt und Kindheit.',
+      tags:['Heimat','Kindheit','Sachsen-Anhalt'], x:280, y:560 },
+    { id:'p_leipzig', name:'Leipzig', sub:'Fast zehn Jahre Lebensmittelpunkt',
+      desc:'Studienort und Zuhause für fast ein Jahrzehnt. Bachelor- und Masterstudium an der Universität Leipzig sowie erste journalistische Stationen bei Mephisto und Detektor.fm.',
+      tags:['Studium','Sachsen','Mephisto'], x:420, y:520 },
+    { id:'hub' },
+    { id:'p_tallinn', name:'Tallinn', sub:'Erasmus 2019 · Estland',
+      desc:'Erasmussemester im Baltikum — spannender Einblick in die lokale Weltsicht und die geopolitische Lage der Region.',
+      tags:['Ausland','Erasmus','Baltikum'], x:660, y:580 },
+    { id:'p_berlin', name:'Berlin', sub:'Praktika · Familienstadt',
+      desc:'Zeitweise Wohnort während Praktika, etwa beim rbb. Heute auch Lebensmittelpunkt meines Vaters.',
+      tags:['Praktika','Familie','Hauptstadt'], x:760, y:660 },
+    { id:'p_koeln', name:'Köln', sub:'Aktueller Wohnort',
+      desc:'Aktueller Lebensmittelpunkt für das WDR-Volontariat. Rheinland, Ehrenfeld und die enge Verbindung zum Sender.',
+      tags:['Aktuell','WDR','Rheinland'], x:860, y:740, terminus:true },
+  ],
+};
+
+/* ================================================================
+   INTERCHANGE DETECTION
+   Stations with same id appearing on multiple lines = interchange
+   ================================================================ */
+const stationLines = {}; // id → [lineIds]
+Object.entries(ROUTES).forEach(([lineId, route]) => {
+  route.forEach(s => {
+    if (!s.id || s.id === 'hub') return;
+    if (!stationLines[s.id]) stationLines[s.id] = [];
+    if (!stationLines[s.id].includes(lineId)) stationLines[s.id].push(lineId);
+  });
+});
+
+/* ================================================================
+   SVG BUILDER
+   ================================================================ */
+const wrap = document.getElementById('map-wrap');
+const svg  = document.getElementById('map-svg');
+const NS   = 'http://www.w3.org/2000/svg';
+const MAP_W = 1060, MAP_H = 960;
+svg.setAttribute('width',   MAP_W);
+svg.setAttribute('height',  MAP_H);
+svg.setAttribute('viewBox', `0 0 ${MAP_W} ${MAP_H}`);
+
+const lineById = {};
+LINES_DEF.forEach(l => lineById[l.id] = l);
+
+function el(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  Object.entries(attrs).forEach(([k,v]) => e.setAttribute(k,v));
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+/* Resolve hub placeholder to actual coordinates */
+function resolveRoute(route) {
+  return route.map(s => s.id === 'hub' ? { ...s, x: HUB.x, y: HUB.y } : s);
+}
+
+/* Metro-style path: only 45° and 90° turns */
+function metroPath(pts) {
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length; i++) {
+    const ax = pts[i-1].x, ay = pts[i-1].y;
+    const bx = pts[i].x,   by = pts[i].y;
+    const dx = bx - ax, dy = by - ay;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < 2 || ady < 2) {
+      d += ` L ${bx} ${by}`;
+    } else if (Math.abs(adx - ady) < 4) {
+      // Perfectly diagonal
+      d += ` L ${bx} ${by}`;
+    } else if (adx > ady) {
+      // Horizontal dominant: turn at 45° then go straight
+      const tx = ax + Math.sign(dx) * ady;
+      d += ` L ${tx} ${by} L ${bx} ${by}`;
+    } else {
+      // Vertical dominant: go straight then 45°
+      const ty = ay + Math.sign(dy) * adx;
+      d += ` L ${bx} ${ty} L ${bx} ${by}`;
+    }
+  }
+  return d;
+}
+
+/* ── BACKGROUND ── */
+function buildBg() {
+  svg.appendChild(el('rect', { width: MAP_W, height: MAP_H, fill: '#ede9da' }));
+
+  const grid = el('g', { opacity: '0.07' });
+  for (let x = 0; x <= MAP_W; x += 40) {
+    grid.appendChild(el('line', { x1:x,y1:0,x2:x,y2:MAP_H, stroke:'#7a5c20','stroke-width':'0.7' }));
+  }
+  for (let y = 0; y <= MAP_H; y += 40) {
+    grid.appendChild(el('line', { x1:0,y1:y,x2:MAP_W,y2:y, stroke:'#7a5c20','stroke-width':'0.7' }));
+  }
+  svg.appendChild(grid);
+
+  // Rhine
+  svg.appendChild(el('path', {
+    d: 'M 590 0 C 620 180 580 380 565 560 C 552 700 540 820 535 960',
+    stroke:'rgba(140,195,225,0.38)', 'stroke-width':'32', fill:'none', 'stroke-linecap':'round'
+  }));
+  const rLabel = el('text', {
+    x:'595', y:'500', fill:'rgba(100,160,200,0.45)',
+    'font-size':'11', 'font-style':'italic', 'font-family':'Arial',
+    transform:'rotate(-72 595 500)'
+  }, 'Rhein');
+  svg.appendChild(rLabel);
+
+  svg.appendChild(el('text', {
+    x:'800', y:'920', fill:'rgba(100,70,20,0.045)',
+    'font-size':'100', 'font-weight':'900', 'font-family':'Arial Narrow,Arial'
+  }, 'KÖLN'));
+}
+
+/* ── LINES ── */
+function buildLines() {
+  const g = el('g', { id:'lines-layer' });
+
+  Object.entries(ROUTES).forEach(([lineId, rawRoute]) => {
+    const line  = lineById[lineId];
+    const route = resolveRoute(rawRoute);
+    const d     = metroPath(route);
+
+    // White halo
+    g.appendChild(el('path', {
+      d, stroke:'#ede9da', 'stroke-width':'13',
+      fill:'none', 'stroke-linecap':'round', 'stroke-linejoin':'round'
+    }));
+    // Coloured line
+    g.appendChild(el('path', {
+      d, stroke: line.color, 'stroke-width':'7',
+      fill:'none', 'stroke-linecap':'round', 'stroke-linejoin':'round'
+    }));
+  });
+
+  svg.appendChild(g);
+}
+
+/* ── STATIONS ── */
+function buildStations() {
+  // Collect unique stations with their resolved positions
+  const seen = {};
+  Object.entries(ROUTES).forEach(([lineId, rawRoute]) => {
+    const route = resolveRoute(rawRoute);
+    route.forEach(s => {
+      if (!s.id || s.id === 'hub') return;
+      if (!seen[s.id]) seen[s.id] = { ...s, lines: [] };
+      if (!seen[s.id].lines.includes(lineId)) seen[s.id].lines.push(lineId);
+    });
+  });
+
+  // Add hub
+  seen['hub_central'] = {
+    id: 'hub_central', name: 'WDR Köln',
+    sub: 'Jahresvolontariat · 10/2025 – 09/2026',
+    desc: 'Ausbildung zum cross-medialen Redakteur und Reporter.',
+    tags: ['Volontariat','Crossmedial','ARD'],
+    lines: LINES_DEF.map(l => l.id),
+    x: HUB.x, y: HUB.y, isHub: true
+  };
+
+  const g = el('g', { id:'stations-layer' });
+
+  Object.values(seen).forEach(s => {
+    const sg    = el('g', { 'data-id': s.id, class:'station-g' });
+    sg.style.cursor = 'pointer';
+
+    const linesArr  = s.lines || [];
+    const isHub     = s.isHub;
+    const isXfer    = linesArr.length > 1;
+    const isTerm    = s.terminus;
+    const primLine  = lineById[linesArr[0]];
+    const outerR    = isHub ? 20 : isXfer ? 12 : isTerm ? 9 : 7;
+
+    // ── Hub: large multi-colour pie ──
+    if (isHub) {
+      // Outer double ring
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:outerR+8, fill:'none', stroke:'#c8b890','stroke-width':'2' }));
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:outerR+3, fill:'#ede9da' }));
+      // Pie segments
+      linesArr.forEach((lid, i) => {
+        const lc   = lineById[lid]?.color || '#888';
+        const n    = linesArr.length;
+        const a0   = (i / n) * Math.PI * 2 - Math.PI/2;
+        const a1   = ((i+1)/n) * Math.PI * 2 - Math.PI/2;
+        const x0   = s.x + outerR * Math.cos(a0);
+        const y0   = s.y + outerR * Math.sin(a0);
+        const x1   = s.x + outerR * Math.cos(a1);
+        const y1   = s.y + outerR * Math.sin(a1);
+        sg.appendChild(el('path', {
+          d: `M ${s.x} ${s.y} L ${x0} ${y0} A ${outerR} ${outerR} 0 0 1 ${x1} ${y1} Z`,
+          fill: lc
+        }));
+      });
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:7, fill:'#fff' }));
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:3, fill:'#1a0f00' }));
+
+    // ── Interchange: double ring with colours ──
+    } else if (isXfer) {
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:outerR+4, fill:'none', stroke:'#ede9da','stroke-width':'4' }));
+      linesArr.forEach((lid, i) => {
+        const lc  = lineById[lid]?.color || '#888';
+        const n   = linesArr.length;
+        const a0  = (i/n)*Math.PI*2 - Math.PI/2;
+        const a1  = ((i+1)/n)*Math.PI*2 - Math.PI/2;
+        const x0  = s.x + outerR*Math.cos(a0);
+        const y0  = s.y + outerR*Math.sin(a0);
+        const x1  = s.x + outerR*Math.cos(a1);
+        const y1  = s.y + outerR*Math.sin(a1);
+        sg.appendChild(el('path', {
+          d:`M ${s.x} ${s.y} L ${x0} ${y0} A ${outerR} ${outerR} 0 0 1 ${x1} ${y1} Z`,
+          fill: lc
+        }));
+      });
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:outerR*0.42, fill:'#fff' }));
+
+    // ── Terminus: filled rectangle ──
+    } else if (isTerm) {
+      sg.appendChild(el('rect', {
+        x:s.x-5, y:s.y-9, width:10, height:18, rx:2,
+        fill: primLine?.color || '#888'
+      }));
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:4, fill:'#fff' }));
+
+    // ── Regular station ──
+    } else {
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:outerR, fill:'#fff', stroke: primLine?.color||'#888', 'stroke-width':'3' }));
+      sg.appendChild(el('circle', { cx:s.x, cy:s.y, r:3, fill: primLine?.color||'#888' }));
+    }
+
+    // ── Label ──
+    if (!isHub) {
+      const labelLeft = (s.labelSide === 'left')  ? true
+                      : (s.labelSide === 'right') ? false
+                      : s.x < HUB.x;
+      const lx = s.x + (labelLeft ? -(outerR+5) : (outerR+5));
+      const anchor = labelLeft ? 'end' : 'start';
+      const ly = s.y - 2;
+
+      // Halo
+      sg.appendChild(el('text', {
+        x:lx, y:ly, 'font-family':'Arial Narrow,Arial', 'font-size':'9.5',
+        'font-weight':'700', fill:'none', stroke:'rgba(237,233,218,0.9)',
+        'stroke-width':'3.5', 'text-anchor':anchor
+      }, s.name));
+      sg.appendChild(el('text', {
+        x:lx, y:ly, 'font-family':'Arial Narrow,Arial', 'font-size':'9.5',
+        'font-weight':'700', fill:'#1a0f00', 'text-anchor':anchor
+      }, s.name));
+
+      // Sub-label (period/role)
+      if (s.sub) {
+        sg.appendChild(el('text', {
+          x:lx, y:ly+11, 'font-family':'Arial Narrow,Arial', 'font-size':'7.5',
+          fill:'rgba(237,233,218,0.85)', stroke:'rgba(237,233,218,0.85)',
+          'stroke-width':'3', 'text-anchor':anchor
+        }, s.sub));
+        sg.appendChild(el('text', {
+          x:lx, y:ly+11, 'font-family':'Arial Narrow,Arial', 'font-size':'7.5',
+          fill:'#8b7040', 'text-anchor':anchor, 'font-weight':'600'
+        }, s.sub));
+      }
+    } else {
+      // Hub label below
+      sg.appendChild(el('text', {
+        x:s.x, y:s.y+outerR+18, 'font-size':'13', 'font-weight':'900',
+        'font-family':'Arial Narrow,Arial', fill:'#1a0f00', 'text-anchor':'middle'
+      }, 'WDR Köln'));
+      sg.appendChild(el('text', {
+        x:s.x, y:s.y+outerR+30, 'font-size':'8', 'font-weight':'700',
+        'font-family':'Arial Narrow,Arial', fill:'#8b7040', 'text-anchor':'middle'
+      }, 'Alle Linien · Zentralhaltestelle'));
+    }
+
+    // Hit area
+    const hit = el('circle', { cx:s.x, cy:s.y, r: Math.max(outerR+14,22), fill:'transparent' });
+    const stationData = isHub
+      ? seen['hub_central']
+      : Object.values(seen).find(st => st.id === s.id);
+    hit.addEventListener('click',    (e) => { e.stopPropagation(); openInfo(stationData || s); });
+    hit.addEventListener('touchend', e => { e.stopPropagation(); e.preventDefault(); openInfo(stationData || s); });
+    sg.appendChild(hit);
+
+    g.appendChild(sg);
+  });
+
+  svg.appendChild(g);
+}
+
+/* ── LINE NUMBER BADGES at termini ── */
+function buildBadges() {
+  const g = el('g', { id:'badges-layer' });
+
+  Object.entries(ROUTES).forEach(([lineId, rawRoute]) => {
+    const line  = lineById[lineId];
+    const route = resolveRoute(rawRoute);
+
+    [route[0], route[route.length-1]].forEach(s => {
+      if (!s.terminus) return;
+      const bW = 22, bH = 14;
+      // Place badge above or below terminus
+      const by = s.y < HUB.y ? s.y - bH - 20 : s.y + 20;
+      g.appendChild(el('rect', {
+        x: s.x - bW/2, y: by, width: bW, height: bH, rx:3, fill: line.color
+      }));
+      g.appendChild(el('text', {
+        x: s.x, y: by + bH - 3,
+        'font-family':'Arial','font-size':'9','font-weight':'900',
+        fill:'#fff','text-anchor':'middle'
+      }, line.num));
+    });
+  });
+
+  svg.appendChild(g);
+}
+
+/* ── LEGEND ── */
+function buildLegend() {
+  const el2 = document.getElementById('legend');
+  el2.innerHTML = '<div class="leg-title">Linien</div>' +
+    LINES_DEF.map(l => `
+      <div class="leg-row">
+        <div class="leg-line" style="background:${l.color}"></div>
+        <span>${l.num} &mdash; ${l.name}</span>
+      </div>`).join('');
+}
+
+/* ── INFO PANEL ── */
+const tooltip   = document.getElementById('tooltip');
+const ttArrow   = document.getElementById('tt-arrow');
+let   activeStation = null;
+
+document.getElementById('tt-close').onclick = () => {
+  tooltip.classList.remove('show');
+  activeStation = null;
+};
+
+// Close tooltip on map drag/click-outside
+wrap.addEventListener('mousedown', () => {
+  tooltip.classList.remove('show');
+  activeStation = null;
+});
+
+function placeTooltip() {
+  if (!activeStation) return;
+
+  // Station world → screen using CURRENT (interpolated) tx/ty/scale
+  const sx = activeStation.x * scale + tx;
+  const sy = activeStation.y * scale + ty;
+
+  const ttW = tooltip.offsetWidth  || 200;
+  const ttH = tooltip.offsetHeight || 160;
+  const ww  = wrap.clientWidth;
+  const wh  = wrap.clientHeight;
+  const HEADER = 56, GAP = 14, ARROW_H = 9;
+
+  // Prefer above, fall back to below
+  let top, arrowClass;
+  if (sy - ttH - GAP - ARROW_H > HEADER) {
+    top = sy - ttH - GAP - ARROW_H;
+    arrowClass = 'above';          // arrow at bottom of card pointing down
+  } else {
+    top = sy + GAP + ARROW_H;
+    arrowClass = 'below';          // arrow at top of card pointing up
+  }
+
+  // Clamp left within viewport
+  let left = sx - ttW / 2;
+  left = Math.max(8, Math.min(ww - ttW - 8, left));
+  top  = Math.max(HEADER + 4, Math.min(wh - ttH - 8, top));
+
+  tooltip.style.left = left + 'px';
+  tooltip.style.top  = top  + 'px';
+
+  // Arrow: position horizontally over the station dot
+  ttArrow.className = 'tt-arrow ' + arrowClass;
+  const arrowLeft = Math.max(18, Math.min(ttW - 18, sx - left));
+  ttArrow.style.left      = arrowLeft + 'px';
+  ttArrow.style.transform = 'translateX(-50%)';
+}
+
+function openInfo(s) {
+  const lids     = s.lines || [];
+  const primLine = lineById[lids[0]] || LINES_DEF[0];
+
+  document.getElementById('tt-pill').textContent       = lids.map(l => lineById[l]?.num).join(' · ');
+  document.getElementById('tt-pill').style.background  = primLine.color;
+  document.getElementById('tt-name').textContent       = s.name || '';
+  document.getElementById('tt-sub').textContent        = s.sub  || '';
+  document.getElementById('tt-desc').textContent       = s.desc || '';
+  document.getElementById('tt-tags').innerHTML         = (s.tags||[]).map(t =>
+    `<span class="tt-tag" style="background:${primLine.color}">${t}</span>`).join('');
+
+  activeStation = s;
+
+  // Show offscreen first so we can measure, then position + reveal
+  tooltip.style.left = '-9999px';
+  tooltip.style.top  = '-9999px';
+  tooltip.classList.add('show');
+
+  requestAnimationFrame(() => {
+    placeTooltip();
+  });
+}
+
+function maybeReposCard() {
+  if (activeStation) placeTooltip();
+}
+
+/* ── PAN / ZOOM ENGINE ── */
+let tx=0, ty=40, scale=0.78;
+let tgtX=0, tgtY=40, tgtScale=0.78;
+let dragging=false, lastMX=0, lastMY=0, velX=0, velY=0;
+
+function applyT() { svg.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; }
+
+function centre() {
+  const ww=wrap.clientWidth, wh=wrap.clientHeight;
+  tgtX=tx=ww/2-MAP_W*scale/2; tgtY=ty=wh/2-MAP_H*scale/2-20;
+}
+
+(function loop() {
+  tx+=(tgtX-tx)*0.13; ty+=(tgtY-ty)*0.13; scale+=(tgtScale-scale)*0.13;
+  if (!dragging) { tgtX+=velX; tgtY+=velY; velX*=0.88; velY*=0.88; }
+  applyT();
+  maybeReposCard();
+  requestAnimationFrame(loop);
+})();
+
+wrap.addEventListener('mousedown', e => {
+  dragging=true; lastMX=e.clientX; lastMY=e.clientY; velX=velY=0;
+  wrap.classList.add('grabbing');
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx=e.clientX-lastMX, dy=e.clientY-lastMY;
+  velX=dx*.35; velY=dy*.35; tgtX+=dx; tgtY+=dy;
+  lastMX=e.clientX; lastMY=e.clientY;
+});
+window.addEventListener('mouseup', () => { dragging=false; wrap.classList.remove('grabbing'); });
+
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const d=e.deltaY>0?-.1:.1;
+  const wx=(e.clientX-tgtX)/tgtScale, wy=(e.clientY-tgtY)/tgtScale;
+  tgtScale=Math.max(.25,Math.min(4,tgtScale+d));
+  tgtX=e.clientX-wx*tgtScale; tgtY=e.clientY-wy*tgtScale;
+},{passive:false});
+
+function zoomBy(d) {
+  const mx=wrap.clientWidth/2, my=wrap.clientHeight/2;
+  const wx=(mx-tgtX)/tgtScale, wy=(my-tgtY)/tgtScale;
+  tgtScale=Math.max(.25,Math.min(4,tgtScale+d));
+  tgtX=mx-wx*tgtScale; tgtY=my-wy*tgtScale;
+}
+document.getElementById('btn-plus').onclick  = () => zoomBy(.18);
+document.getElementById('btn-minus').onclick = () => zoomBy(-.18);
+
+let t1=null, tDist0=1, tScale0=1;
+wrap.addEventListener('touchstart', e => {
+  if (e.touches.length===1) {
+    dragging=true; velX=velY=0;
+    lastMX=e.touches[0].clientX; lastMY=e.touches[0].clientY;
+  } else if (e.touches.length===2) {
+    dragging=false;
+    tDist0=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    tScale0=tgtScale;
+  }
+},{passive:true});
+wrap.addEventListener('touchmove', e => {
+  if (e.touches.length===1 && dragging) {
+    const dx=e.touches[0].clientX-lastMX, dy=e.touches[0].clientY-lastMY;
+    velX=dx*.35; velY=dy*.35; tgtX+=dx; tgtY+=dy;
+    lastMX=e.touches[0].clientX; lastMY=e.touches[0].clientY;
+  } else if (e.touches.length===2) {
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    tgtScale=Math.max(.25,Math.min(4,tScale0*d/tDist0));
+  }
+  e.preventDefault();
+},{passive:false});
+wrap.addEventListener('touchend', () => { dragging=false; });
+
+/* ── BUILD & INIT ── */
+buildBg();
+buildLines();
+buildStations();
+buildBadges();
+buildLegend();
+centre();
+
+setTimeout(() => document.getElementById('hint').classList.add('gone'), 3500);
+</script>
+</body>
+</html>
